@@ -72,3 +72,10 @@ API Gateway: http://127.0.0.1:8000/docs
 
 ## Notes
 Payments use mock processing for testing. This project is a backend implementation.
+
+## Postman Collection
+Postman API collection is available at:
+
+postman/Inventory_Order_Management_Postman_Collection.json
+
+Import this file into Postman to test the APIs.
