@@ -1,16 +1,46 @@
-from fastapi import FastAPI, HTTPException
+import os
+from dotenv import load_dotenv
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from jose import jwt, JWTError
 from pydantic import BaseModel, Field
-from sqlalchemy import create_engine, Column, Integer, String, Text
+from sqlalchemy import create_engine, Column, Integer, Text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
+load_dotenv()
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = "HS256"
+
 app = FastAPI(title="Review Service")
+
+security = HTTPBearer()
 
 engine = create_engine(
     "sqlite:///./reviews.db",
     connect_args={"check_same_thread": False}
 )
+
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
+
+
+def verify_token(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    token = credentials.credentials
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
+
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+        return int(user_id)
+
+    except (JWTError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 
 class Review(Base):
@@ -27,7 +57,6 @@ Base.metadata.create_all(bind=engine)
 
 
 class ReviewData(BaseModel):
-    user_id: int = Field(gt=0)
     product_id: int = Field(gt=0)
     rating: int = Field(ge=1, le=5)
     comment: str = ""
@@ -39,10 +68,20 @@ def home():
 
 
 @app.post("/reviews")
-def create_review(data: ReviewData):
+def create_review(
+    data: ReviewData,
+    user_id: int = Depends(verify_token)
+):
     db = SessionLocal()
+
     try:
-        review = Review(**data.model_dump())
+        review = Review(
+            user_id=user_id,
+            product_id=data.product_id,
+            rating=data.rating,
+            comment=data.comment
+        )
+
         db.add(review)
         db.commit()
         db.refresh(review)
@@ -50,20 +89,27 @@ def create_review(data: ReviewData):
         return {
             "message": "Review added successfully",
             "review_id": review.id,
+            "user_id": review.user_id,
             "product_id": review.product_id,
             "rating": review.rating,
             "comment": review.comment
         }
+
     finally:
         db.close()
 
 
 @app.get("/reviews/{product_id}")
-def get_reviews(product_id: int):
+def get_reviews(
+    product_id: int,
+    user_id: int = Depends(verify_token)
+):
     db = SessionLocal()
+
     try:
         reviews = db.query(Review).filter(
-            Review.product_id == product_id
+            Review.product_id == product_id,
+            Review.user_id == user_id
         ).all()
 
         return [
@@ -75,5 +121,6 @@ def get_reviews(product_id: int):
             }
             for r in reviews
         ]
+
     finally:
         db.close()

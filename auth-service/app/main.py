@@ -1,6 +1,11 @@
 from jose import jwt
 from datetime import datetime, timedelta, timezone
 
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import create_engine, Column, Integer, String
@@ -9,7 +14,7 @@ from passlib.context import CryptContext
 
 app = FastAPI(title="Authentication Service")
 
-SECRET_KEY = "dev-secret-change-before-submission"
+SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 

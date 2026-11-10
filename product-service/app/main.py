@@ -1,3 +1,15 @@
+import os
+from dotenv import load_dotenv
+from jose import jwt, JWTError
+from fastapi import Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+load_dotenv()
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = "HS256"
+
+bearer_scheme = HTTPBearer()
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -38,9 +50,30 @@ class ProductData(BaseModel):
 def home():
     return {"message": "Product Service is running"}
 
+def verify_token(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)
+):
+    token = credentials.credentials
+
+    try:
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM]
+        )
+        return payload
+    except JWTError:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token"
+        )
+
 
 @app.post("/products")
-def create_product(data: ProductData):
+def create_product(
+    data: ProductData,
+    token_data: dict = Depends(verify_token)
+):
     db = SessionLocal()
     try:
         product = Product(**data.model_dump())

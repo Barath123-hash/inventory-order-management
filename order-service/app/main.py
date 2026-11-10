@@ -1,7 +1,20 @@
-from fastapi import FastAPI, HTTPException
+
+import os
+from dotenv import load_dotenv
+from jose import jwt, JWTError
+
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, Column, Integer, Float, String
 from sqlalchemy.orm import declarative_base, sessionmaker
+
+load_dotenv()
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = "HS256"
+
+bearer_scheme = HTTPBearer()
 
 app = FastAPI(title="Order Service")
 
@@ -28,10 +41,28 @@ Base.metadata.create_all(bind=engine)
 
 
 class OrderData(BaseModel):
-    user_id: int = Field(gt=0)
     product_id: int = Field(gt=0)
     quantity: int = Field(gt=0)
     unit_price: float = Field(gt=0)
+
+
+def verify_token(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)
+):
+    token = credentials.credentials
+
+    try:
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM]
+        )
+        return payload
+    except JWTError:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token"
+        )
 
 
 @app.get("/")
@@ -40,13 +71,18 @@ def home():
 
 
 @app.post("/orders")
-def create_order(data: OrderData):
+def create_order(
+    data: OrderData,
+    token_data: dict = Depends(verify_token)
+):
+    user_id = int(token_data["sub"])
+
     db = SessionLocal()
     try:
         total = data.quantity * data.unit_price
 
         order = Order(
-            user_id=data.user_id,
+            user_id=user_id,
             product_id=data.product_id,
             quantity=data.quantity,
             total_amount=total,
@@ -70,8 +106,12 @@ def create_order(data: OrderData):
         db.close()
 
 
-@app.get("/orders/{user_id}")
-def get_orders(user_id: int):
+@app.get("/orders")
+def get_orders(
+    token_data: dict = Depends(verify_token)
+):
+    user_id = int(token_data["sub"])
+
     db = SessionLocal()
     try:
         orders = db.query(Order).filter(
@@ -93,8 +133,15 @@ def get_orders(user_id: int):
 
 
 @app.patch("/orders/{order_id}/status")
-def update_order_status(order_id: int, status: str):
-    allowed_statuses = ["PLACED", "CONFIRMED", "SHIPPED", "DELIVERED", "CANCELLED"]
+def update_order_status(
+    order_id: int,
+    status: str,
+    token_data: dict = Depends(verify_token)
+):
+    allowed_statuses = [
+        "PLACED", "CONFIRMED", "SHIPPED",
+        "DELIVERED", "CANCELLED"
+    ]
 
     if status not in allowed_statuses:
         raise HTTPException(
@@ -105,7 +152,8 @@ def update_order_status(order_id: int, status: str):
     db = SessionLocal()
     try:
         order = db.query(Order).filter(
-            Order.id == order_id
+            Order.id == order_id,
+            Order.user_id == int(token_data["sub"])
         ).first()
 
         if not order:

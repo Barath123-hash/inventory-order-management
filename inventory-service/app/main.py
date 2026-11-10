@@ -1,8 +1,20 @@
 
-from fastapi import FastAPI, HTTPException
+import os
+from dotenv import load_dotenv
+from jose import jwt, JWTError
+
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, Column, Integer
 from sqlalchemy.orm import declarative_base, sessionmaker
+
+load_dotenv()
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = "HS256"
+
+bearer_scheme = HTTPBearer()
 
 app = FastAPI(title="Inventory Service")
 
@@ -30,13 +42,35 @@ class StockData(BaseModel):
     quantity: int = Field(ge=0)
 
 
+def verify_token(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)
+):
+    token = credentials.credentials
+
+    try:
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM]
+        )
+        return payload
+    except JWTError:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token"
+        )
+
+
 @app.get("/")
 def home():
     return {"message": "Inventory Service is running"}
 
 
 @app.post("/inventory")
-def add_stock(data: StockData):
+def add_stock(
+    data: StockData,
+    token_data: dict = Depends(verify_token)
+):
     db = SessionLocal()
     try:
         stock = db.query(Inventory).filter(

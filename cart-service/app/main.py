@@ -1,7 +1,20 @@
-from fastapi import FastAPI, HTTPException
+
+import os
+from dotenv import load_dotenv
+from jose import jwt, JWTError
+
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, Column, Integer
 from sqlalchemy.orm import declarative_base, sessionmaker
+
+load_dotenv()
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = "HS256"
+
+bearer_scheme = HTTPBearer()
 
 app = FastAPI(title="Cart Service")
 
@@ -26,9 +39,27 @@ Base.metadata.create_all(bind=engine)
 
 
 class CartData(BaseModel):
-    user_id: int = Field(gt=0)
     product_id: int = Field(gt=0)
     quantity: int = Field(gt=0)
+
+
+def verify_token(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)
+):
+    token = credentials.credentials
+
+    try:
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM]
+        )
+        return payload
+    except JWTError:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token"
+        )
 
 
 @app.get("/")
@@ -37,18 +68,27 @@ def home():
 
 
 @app.post("/cart")
-def add_to_cart(data: CartData):
+def add_to_cart(
+    data: CartData,
+    token_data: dict = Depends(verify_token)
+):
+    user_id = int(token_data["sub"])
+
     db = SessionLocal()
     try:
         item = db.query(CartItem).filter(
-            CartItem.user_id == data.user_id,
+            CartItem.user_id == user_id,
             CartItem.product_id == data.product_id
         ).first()
 
         if item:
             item.quantity += data.quantity
         else:
-            item = CartItem(**data.model_dump())
+            item = CartItem(
+                user_id=user_id,
+                product_id=data.product_id,
+                quantity=data.quantity
+            )
             db.add(item)
 
         db.commit()
@@ -65,8 +105,12 @@ def add_to_cart(data: CartData):
         db.close()
 
 
-@app.get("/cart/{user_id}")
-def view_cart(user_id: int):
+@app.get("/cart")
+def view_cart(
+    token_data: dict = Depends(verify_token)
+):
+    user_id = int(token_data["sub"])
+
     db = SessionLocal()
     try:
         items = db.query(CartItem).filter(
@@ -87,11 +131,17 @@ def view_cart(user_id: int):
 
 
 @app.delete("/cart/{cart_id}")
-def remove_from_cart(cart_id: int):
+def remove_from_cart(
+    cart_id: int,
+    token_data: dict = Depends(verify_token)
+):
+    user_id = int(token_data["sub"])
+
     db = SessionLocal()
     try:
         item = db.query(CartItem).filter(
-            CartItem.id == cart_id
+            CartItem.id == cart_id,
+            CartItem.user_id == user_id
         ).first()
 
         if not item:
